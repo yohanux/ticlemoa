@@ -38,8 +38,8 @@
       <section id="rss"></section>
     </main>
     <script>
-      // 피드 URL 설정
-      const feeds = [
+      // 모든 가능한 피드 정의
+      const availableFeeds = [
         {
           name: '토스테크',
           url: 'https://yohanux.github.io/rss-to-json-feed/toss.json',
@@ -56,6 +56,257 @@
           icon: 'resources/daangn.png'
         }
       ];
+
+      // 활성화된 피드 (초기에는 토스만)
+      let activeFeeds = [availableFeeds[0]];
+
+      // 피드 추가 모달 생성
+      function createAddFeedModal() {
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.innerHTML = `
+          <div class="modal-content">
+            <h2>피드 추가/제거</h2>
+            <div class="feed-list">
+              ${availableFeeds.slice(1).map(feed => `
+                <div class="feed-item ${activeFeeds.some(af => af.name === feed.name) ? 'active' : ''}"
+                     onclick="toggleFeed('${feed.name}', this)">
+                  <img src="${feed.icon}" alt="${feed.name}" class="feed-icon">
+                  <span>${feed.name}</span>
+                </div>
+              `).join('')}
+            </div>
+            <div class="modal-buttons">
+              <button onclick="applyFeedChanges()">적용</button>
+              <button onclick="closeModal()" class="cancel-button">취소</button>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(modal);
+
+        // 모달 닫기 버튼 스타일 추가
+        const style = document.createElement('style');
+        style.textContent = `
+          .modal-buttons {
+            display: flex;
+            gap: 12px;
+          }
+          .modal-buttons button {
+            flex: 1;
+          }
+          .cancel-button {
+            background-color: #666 !important;
+          }
+          .cancel-button:hover {
+            background-color: #555 !important;
+          }
+        `;
+        document.head.appendChild(style);
+      }
+
+      // 선택한 피드를 임시 저장할 배열
+      let tempActiveFeeds = [];
+
+      // 피드 토글 함수 수정
+      function toggleFeed(feedName, element) {
+        const feed = availableFeeds.find(f => f.name === feedName);
+        
+        if (element.classList.contains('active')) {
+          element.classList.remove('active');
+          tempActiveFeeds = tempActiveFeeds.filter(af => af.name !== feedName);
+        } else {
+          element.classList.add('active');
+          if (!tempActiveFeeds.some(af => af.name === feedName)) {
+            tempActiveFeeds.push(feed);
+          }
+        }
+      }
+
+      // 사용자 상태 관리
+      let currentUser = null;
+
+      // 구글 로그인 콜백 함수 수정
+      async function onGoogleSignIn(response) {
+        const jwt = response.credential;
+        const payload = JSON.parse(atob(jwt.split('.')[1]));
+        
+        currentUser = {
+          id: payload.sub,
+          name: payload.name,
+          email: payload.email,
+          token: jwt
+        };
+
+        // 로그인 상태 표시
+        updateLoginStatus();
+        
+        // 사용자의 피드 설정 불러오기
+        await loadUserFeedSettings();
+      }
+
+      // 로그인 상태 UI 업데이트
+      function updateLoginStatus() {
+        const loginContainer = document.querySelector('.nav-login');
+        if (currentUser) {
+          loginContainer.innerHTML = `
+            <div class="user-info">
+              <span class="user-name">${currentUser.name}</span>
+              <button onclick="handleSignOut()" class="sign-out-btn">로그아웃</button>
+            </div>
+          `;
+        } else {
+          loginContainer.innerHTML = `
+            <div id="g_id_onload"
+              data-client_id="659949826583-0f71n7kr44grvqrc77qv5iqqmndhl0p0.apps.googleusercontent.com"
+              data-context="signin"
+              data-ux_mode="popup"
+              data-callback="onGoogleSignIn"
+              data-auto_prompt="false">
+            </div>
+            <div class="g_id_signin"
+              data-type="standard"
+              data-shape="rectangular"
+              data-theme="outline"
+              data-text="signin_with"
+              data-size="medium"
+              data-logo_alignment="left">
+            </div>
+          `;
+          
+          // Google Identity Services 재초기화
+          if (window.google && window.google.accounts) {
+            google.accounts.id.initialize({
+              client_id: "659949826583-0f71n7kr44grvqrc77qv5iqqmndhl0p0.apps.googleusercontent.com",
+              callback: onGoogleSignIn
+            });
+          }
+        }
+      }
+
+      // 로그아웃 처리
+      function handleSignOut() {
+        if (window.google && window.google.accounts) {
+          google.accounts.id.disableAutoSelect();
+        }
+        currentUser = null;
+        // 기본 피드 설정으로 복원
+        activeFeeds = [availableFeeds[0]];
+        updateLoginStatus();
+        updateButtons();
+        selectFeed('all');
+      }
+
+      // 사용자 피드 설정 저장
+      async function saveUserFeedSettings() {
+        if (!currentUser) return;
+
+        const settings = {
+          userId: currentUser.id,
+          activeFeeds: activeFeeds.map(feed => feed.name)
+        };
+
+        try {
+          const response = await fetch('https://yohanux.github.io/rss-to-json-feed/users/' + currentUser.id + '.json', {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + currentUser.token
+            },
+            body: JSON.stringify(settings)
+          });
+
+          if (!response.ok) {
+            throw new Error('Failed to save settings');
+          }
+        } catch (error) {
+          console.error('Error saving settings:', error);
+          alert('설정 저장에 실패했습니다. 나중에 다시 시도해주세요.');
+        }
+      }
+
+      // 사용자 피드 설정 불러오기
+      async function loadUserFeedSettings() {
+        if (!currentUser) return;
+
+        try {
+          const response = await fetch('https://yohanux.github.io/rss-to-json-feed/users/' + currentUser.id + '.json', {
+            headers: {
+              'Authorization': 'Bearer ' + currentUser.token
+            }
+          });
+
+          if (response.ok) {
+            const settings = await response.json();
+            // 저장된 피드 설정 복원
+            activeFeeds = [availableFeeds[0]]; // 토스는 항상 포함
+            settings.activeFeeds.forEach(feedName => {
+              const feed = availableFeeds.find(f => f.name === feedName);
+              if (feed && feed.name !== availableFeeds[0].name) {
+                activeFeeds.push(feed);
+              }
+            });
+            updateButtons();
+            selectFeed('all');
+          }
+        } catch (error) {
+          console.error('Error loading settings:', error);
+          // 에러 발생 시 기본 설정 사용
+          activeFeeds = [availableFeeds[0]];
+          updateButtons();
+          selectFeed('all');
+        }
+      }
+
+      // 피드 변경사항 적용 함수 수정
+      function applyFeedChanges() {
+        // 토스 피드는 항상 포함
+        activeFeeds = [availableFeeds[0], ...tempActiveFeeds];
+        updateButtons();
+        selectFeed('all');
+        closeModal();
+
+        // 변경사항 저장
+        if (currentUser) {
+          saveUserFeedSettings();
+        }
+      }
+
+      // 모달 닫기
+      function closeModal() {
+        const modal = document.querySelector('.modal');
+        if (modal) {
+          modal.remove();
+        }
+      }
+
+      // 버튼 업데이트
+      function updateButtons() {
+        const btnContainer = document.getElementById('rss-buttons');
+        btnContainer.innerHTML = '';
+        
+        // 전체 버튼 추가
+        const allBtn = document.createElement('button');
+        allBtn.textContent = '전체';
+        allBtn.onclick = () => selectFeed('all');
+        allBtn.classList.add('active');
+        btnContainer.appendChild(allBtn);
+
+        // 활성화된 피드 버튼 추가
+        activeFeeds.forEach((feed, idx) => {
+          const btn = document.createElement('button');
+          btn.textContent = feed.name;
+          btn.onclick = () => selectFeed(idx);
+          btnContainer.appendChild(btn);
+        });
+
+        // + 버튼 추가
+        const plusBtn = document.createElement('button');
+        plusBtn.textContent = '+';
+        plusBtn.style.fontWeight = 'bold';
+        plusBtn.style.fontSize = '1.2em';
+        plusBtn.onclick = createAddFeedModal;
+        btnContainer.appendChild(plusBtn);
+      }
 
       // 캐시 관리를 위한 객체
       const feedCache = {
@@ -77,28 +328,6 @@
           this.timestamp[key] = Date.now();
         }
       };
-
-      // 버튼 생성
-      const btnContainer = document.getElementById('rss-buttons');
-      // 전체 버튼 추가
-      const allBtn = document.createElement('button');
-      allBtn.textContent = '전체';
-      allBtn.onclick = () => selectFeed('all');
-      allBtn.classList.add('active');
-      btnContainer.appendChild(allBtn);
-      feeds.forEach((feed, idx) => {
-        const btn = document.createElement('button');
-        btn.textContent = feed.name;
-        btn.onclick = () => selectFeed(idx);
-        btnContainer.appendChild(btn);
-      });
-      // + 버튼 추가 (맨 우측)
-      const plusBtn = document.createElement('button');
-      plusBtn.textContent = '+';
-      plusBtn.style.fontWeight = 'bold';
-      plusBtn.style.fontSize = '1.2em';
-      plusBtn.onclick = () => { window.location.href = 'edit.html'; };
-      btnContainer.appendChild(plusBtn);
 
       // 디버그 로깅 함수
       function debugLog(message, data = null) {
@@ -182,7 +411,7 @@
       // 피드 선택 및 표시
       async function selectFeed(idx) {
         // 버튼 active 처리
-        Array.from(btnContainer.children).forEach((btn, i) => {
+        Array.from(document.getElementById('rss-buttons').children).forEach((btn, i) => {
           if(idx === 'all') {
             btn.classList.toggle('active', i === 0);
           } else {
@@ -196,8 +425,8 @@
         try {
           if(idx === 'all') {
             debugLog('Fetching all feeds...');
-            // 모든 피드를 병렬로 fetch
-            const results = await Promise.all(feeds.map(feed => fetchFeed(feed)));
+            // 활성화된 피드만 fetch
+            const results = await Promise.all(activeFeeds.map(feed => fetchFeed(feed)));
             debugLog('All feeds results:', results);
             
             const allItems = results.flatMap(feed => feed.items)
@@ -219,14 +448,14 @@
               rssContainer.innerHTML = '<div class="error-message">피드를 불러오는데 실패했습니다. 잠시 후 다시 시도해주세요.</div>';
             }
           } else {
-            debugLog(`Fetching feed for ${feeds[idx].name}...`);
-            const data = await fetchFeed(feeds[idx]);
+            debugLog(`Fetching feed for ${activeFeeds[idx].name}...`);
+            const data = await fetchFeed(activeFeeds[idx]);
             debugLog(`Feed data:`, data);
             
             if (data.items && data.items.length > 0) {
               rssContainer.innerHTML = data.items.map(item => `
                 <div class="article-item">
-                  <img src="${feeds[idx].icon}" alt="icon" class="article-icon" onerror="this.src='resources/default-icon.png'">
+                  <img src="${activeFeeds[idx].icon}" alt="icon" class="article-icon" onerror="this.src='resources/default-icon.png'">
                   <div class="article-content">
                     <a href="${item.link}" target="_blank" class="article-title">${item.title}</a>
                     <div class="article-date">${item.pubDate ? formatDate(item.pubDate) : ''}</div>
@@ -278,17 +507,48 @@
         return `${yyyy}.${mm}.${dd}`;
       }
 
-      // 구글 로그인 콜백 함수
-      function onGoogleSignIn(response) {
-        // response.credential에 JWT가 담겨있음
-        const jwt = response.credential;
-        // JWT를 디코드하거나, 서버로 전달하여 사용자 인증 처리
-        // 예시: 사용자 이름 추출
-        const payload = JSON.parse(atob(jwt.split('.')[1]));
-        alert('환영합니다, ' + payload.name + '님!');
-      }
+      // 스타일 추가
+      const style = document.createElement('style');
+      style.textContent = `
+        .user-info {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+        .user-name {
+          font-size: 14px;
+          color: #333;
+        }
+        .sign-out-btn {
+          padding: 6px 12px;
+          border: 1px solid #ddd;
+          border-radius: 4px;
+          background: #f5f5f5;
+          cursor: pointer;
+          font-size: 14px;
+        }
+        .sign-out-btn:hover {
+          background: #e5e5e5;
+        }
+        @media (prefers-color-scheme: dark) {
+          .user-name {
+            color: #fff;
+          }
+          .sign-out-btn {
+            background: #333;
+            border-color: #444;
+            color: #fff;
+          }
+          .sign-out-btn:hover {
+            background: #444;
+          }
+        }
+      `;
+      document.head.appendChild(style);
 
-      // 첫 번째(전체) 피드 기본 표시
+      // 초기 상태 설정
+      updateLoginStatus();
+      updateButtons();
       selectFeed('all');
     </script>
   </body>
