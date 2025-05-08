@@ -1,137 +1,290 @@
-body { font-family: sans-serif; margin: 0; padding: 0; background: #f5f5f5; }
-@media (prefers-color-scheme: dark) {
-  body { background: #000000; }
-}
-.navbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0 20px;
-  background-color: #ffffff;
-  border-bottom: 1px solid #e5e5e5;
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 64px;
-  z-index: 1000;
-}
-.navbar .nav-title { flex: 1; }
-.navbar .nav-login { margin-left: auto; }
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="stylesheet" href="index.css">
+    <!-- Google Identity Services 라이브러리 추가 -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+  </head>
+  <body>
+    <div class="navbar">
+      <span class="nav-title">티클모아 - 아티클 모아보기</span>
+      <span class="nav-login">
+        <div id="g_id_onload"
+          data-client_id="659949826583-0f71n7kr44grvqrc77qv5iqqmndhl0p0.apps.googleusercontent.com"
+          data-context="signin"
+          data-ux_mode="popup"
+          data-callback="onGoogleSignIn"
+          data-auto_prompt="false">
+        </div>
+        <div class="g_id_signin"
+          data-type="standard"
+          data-shape="rectangular"
+          data-theme="outline"
+          data-text="signin_with"
+          data-size="medium"
+          data-logo_alignment="left">
+        </div>
+      </span>
+    </div>
+    <div class="content-container">
+      <div class="rss-buttons" id="rss-buttons"></div>
+      <div id="rss"></div>
+    </div>
+    <script>
+      // 피드 URL 설정
+      const feeds = [
+        {
+          name: '토스테크',
+          url: 'https://yohanux.github.io/rss-to-json-feed/toss.json',
+          icon: 'resources/tosstech.png'
+        },
+        {
+          name: '우아한테크블로그',
+          url: 'https://yohanux.github.io/rss-to-json-feed/woowahan.json',
+          icon: 'resources/woowahan.png'
+        },
+        {
+          name: '당근',
+          url: 'https://yohanux.github.io/rss-to-json-feed/daangn.json',
+          icon: 'resources/daangn.png'
+        }
+      ];
 
-.content-container {
-  padding-top: 84px; /* navbar height (64px) + 20px margin */
-  padding-bottom: 20px;
-  max-width: 1200px;
-  margin: 0 auto;
-  width: 100%;
-  box-sizing: border-box;
-}
+      // 캐시 관리를 위한 객체
+      const feedCache = {
+        data: {},
+        timestamp: {},
+        CACHE_DURATION: 5 * 60 * 1000, // 5분
 
-.rss-buttons {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 20px;
-  flex-wrap: wrap;
-  padding: 0 24px;
-}
-@media (prefers-color-scheme: dark) {
-  .rss-buttons { background: #000; border-bottom: 1px solid #222; }
-}
-.rss-buttons button {
-  padding: 8px 18px;
-  border: none;
-  border-radius: 6px;
-  background: #eee;
-  cursor: pointer;
-  font-size: 16px;
-  transition: background 0.2s;
-}
-.rss-buttons button.active {
-  background: #0070f3;
-  color: #fff;
-}
-#rss { padding: 24px; }
-.article-item {
-  display: flex;
-  padding: 20px;
-  border: 1px solid #eaeaea;
-  margin-bottom: 20px;
-  border-radius: 8px;
-  background-color: #ffffff;
-}
-.article-icon {
-  width: 32px;
-  height: 32px;
-  margin-right: 12px;
-  flex-shrink: 0;
-}
-.article-content {
-  flex: 1;
-}
-.article-title {
-  font-size: 19px;
-  font-weight: bold;
-  color: #333;
-  text-decoration: none;
-  display: block;
-  margin-bottom: 8px;
-}
-.article-title:hover {
-  text-decoration: underline;
-}
-.article-date {
-  font-size: 14px;
-  color: #888;
-  margin-bottom: 8px;
-}
-.article-desc {
-  font-size: 16px;
-  color: #666;
-  line-height: 1.5;
-  margin: 0;
-}
-@media (prefers-color-scheme: dark) {
-  .article-item { background: #161616; box-shadow: 0 2px 8px #0008; }
-  .article-title { color: #fff; }
-  .article-date { color: #aaa; }
-  .article-desc { color: #eee; }
-} 
+        async get(key) {
+          const now = Date.now();
+          if (this.data[key] && this.timestamp[key] && 
+              (now - this.timestamp[key] < this.CACHE_DURATION)) {
+            return this.data[key];
+          }
+          return null;
+        },
 
-.loading {
-  text-align: center;
-  padding: 20px;
-  color: #666;
-}
+        set(key, data) {
+          this.data[key] = data;
+          this.timestamp[key] = Date.now();
+        }
+      };
 
-.spinner {
-  display: inline-block;
-  width: 30px;
-  height: 30px;
-  border: 3px solid #f3f3f3;
-  border-top: 3px solid #3498db;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-  margin-top: 10px;
-}
+      // 버튼 생성
+      const btnContainer = document.getElementById('rss-buttons');
+      // 전체 버튼 추가
+      const allBtn = document.createElement('button');
+      allBtn.textContent = '전체';
+      allBtn.onclick = () => selectFeed('all');
+      allBtn.classList.add('active');
+      btnContainer.appendChild(allBtn);
+      feeds.forEach((feed, idx) => {
+        const btn = document.createElement('button');
+        btn.textContent = feed.name;
+        btn.onclick = () => selectFeed(idx);
+        btnContainer.appendChild(btn);
+      });
+      // + 버튼 추가 (맨 우측)
+      const plusBtn = document.createElement('button');
+      plusBtn.textContent = '+';
+      plusBtn.style.fontWeight = 'bold';
+      plusBtn.style.fontSize = '1.2em';
+      plusBtn.onclick = () => { window.location.href = 'edit.html'; };
+      btnContainer.appendChild(plusBtn);
 
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
+      // 디버그 로깅 함수
+      function debugLog(message, data = null) {
+        const timestamp = new Date().toISOString();
+        console.log(`[${timestamp}] ${message}`);
+        if (data) {
+          console.log(data);
+        }
+      }
 
-.error-message {
-  text-align: center;
-  padding: 20px;
-  color: #ff4444;
-  background-color: #ffebee;
-  border-radius: 8px;
-  margin: 20px 0;
-}
+      // 피드를 가져오는 함수
+      async function fetchFeed(feed) {
+        try {
+          // 캐시 확인
+          const cachedData = await feedCache.get(feed.url);
+          if (cachedData) {
+            debugLog(`Using cached data for ${feed.name}`);
+            return cachedData;
+          }
 
-@media (prefers-color-scheme: dark) {
-  .error-message {
-    background-color: #331111;
-    color: #ff6666;
-  }
-} 
+          debugLog(`Attempting to fetch feed: ${feed.name}`, {
+            url: feed.url
+          });
+
+          const response = await fetch(feed.url);
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          
+          const jsonData = await response.json();
+          debugLog(`Successfully fetched JSON feed: ${feed.name}`);
+
+          // JSON 데이터를 기존 형식으로 변환
+          const items = Array.isArray(jsonData) ? jsonData : [jsonData];
+          const result = {
+            name: feed.name,
+            icon: feed.icon,
+            items: items.map(item => ({
+              title: item.title || '',
+              link: item.link || '',
+              description: item.description || '',
+              pubDate: item.pubDate || '',
+              feedName: feed.name,
+              feedIcon: feed.icon
+            }))
+          };
+
+          // 결과 캐싱
+          feedCache.set(feed.url, result);
+          return result;
+
+        } catch (error) {
+          debugLog(`Error in fetchFeed for ${feed.name}`, error);
+          
+          // 에러 상세 정보 수집
+          const errorInfo = {
+            feedName: feed.name,
+            url: feed.url,
+            errorType: error.name,
+            errorMessage: error.message,
+            stack: error.stack
+          };
+          
+          debugLog('Detailed error information:', errorInfo);
+
+          // 캐시된 데이터 확인
+          const cachedData = await feedCache.get(feed.url);
+          if (cachedData) {
+            debugLog(`Returning cached data for ${feed.name}`);
+            return cachedData;
+          }
+
+          return {
+            name: feed.name,
+            icon: feed.icon,
+            items: []
+          };
+        }
+      }
+
+      // 피드 선택 및 표시
+      async function selectFeed(idx) {
+        // 버튼 active 처리
+        Array.from(btnContainer.children).forEach((btn, i) => {
+          if(idx === 'all') {
+            btn.classList.toggle('active', i === 0);
+          } else {
+            btn.classList.toggle('active', i === idx + 1);
+          }
+        });
+
+        const rssContainer = document.getElementById('rss');
+        rssContainer.innerHTML = '<div class="loading">불러오는 중...<div class="spinner"></div></div>';
+
+        try {
+          if(idx === 'all') {
+            debugLog('Fetching all feeds...');
+            // 모든 피드를 병렬로 fetch
+            const results = await Promise.all(feeds.map(feed => fetchFeed(feed)));
+            debugLog('All feeds results:', results);
+            
+            const allItems = results.flatMap(feed => feed.items)
+              .filter(item => item.pubDate && item.title)
+              .sort((a, b) => new Date(b.pubDate) - new Date(a.pubDate));
+
+            if (allItems.length > 0) {
+              rssContainer.innerHTML = allItems.map(item => `
+                <div class="article-item">
+                  <img src="${item.feedIcon}" alt="icon" class="article-icon" onerror="this.src='resources/default-icon.png'">
+                  <div class="article-content">
+                    <a href="${item.link}" target="_blank" class="article-title">${item.title}</a>
+                    <div class="article-date">${item.pubDate ? formatDate(item.pubDate) : ''}</div>
+                    ${cleanDescription(item) ? `<p class='article-desc'>${cleanDescription(item)}</p>` : ''}
+                  </div>
+                </div>
+              `).join('');
+            } else {
+              rssContainer.innerHTML = '<div class="error-message">피드를 불러오는데 실패했습니다. 잠시 후 다시 시도해주세요.</div>';
+            }
+          } else {
+            debugLog(`Fetching feed for ${feeds[idx].name}...`);
+            const data = await fetchFeed(feeds[idx]);
+            debugLog(`Feed data:`, data);
+            
+            if (data.items && data.items.length > 0) {
+              rssContainer.innerHTML = data.items.map(item => `
+                <div class="article-item">
+                  <img src="${feeds[idx].icon}" alt="icon" class="article-icon" onerror="this.src='resources/default-icon.png'">
+                  <div class="article-content">
+                    <a href="${item.link}" target="_blank" class="article-title">${item.title}</a>
+                    <div class="article-date">${item.pubDate ? formatDate(item.pubDate) : ''}</div>
+                    ${cleanDescription(item) ? `<p class='article-desc'>${cleanDescription(item)}</p>` : ''}
+                  </div>
+                </div>
+              `).join('');
+            } else {
+              rssContainer.innerHTML = '<div class="error-message">피드를 불러오는데 실패했습니다. 잠시 후 다시 시도해주세요.</div>';
+            }
+          }
+        } catch (error) {
+          console.error('Error:', error);
+          rssContainer.innerHTML = '<div class="error-message">피드를 불러오는데 실패했습니다. 잠시 후 다시 시도해주세요.</div>';
+        }
+      }
+
+      function cleanDescription(item) {
+        let desc = item.description || '';
+        // HTML 태그 제거
+        desc = desc.replace(/(<([^>]+)>)/gi, '');
+        // 긴 설명은 200자로 제한
+        if (desc.length > 200) {
+          desc = desc.substring(0, 200) + '...';
+        }
+        return desc;
+      }
+
+      function formatDate(dateStr) {
+        if (!dateStr) return '';
+        let d;
+        try {
+          // ISO 8601 형식 (예: 2024-03-21T12:34:56Z) 또는 RFC 2822 형식 처리
+          d = new Date(dateStr);
+          if (isNaN(d.getTime())) {
+            // 유닉스 타임스탬프 처리 (밀리초)
+            d = new Date(parseInt(dateStr));
+          }
+          if (isNaN(d.getTime())) {
+            return dateStr; // 파싱 실패시 원본 문자열 반환
+          }
+        } catch (e) {
+          console.error('Date parsing error:', e);
+          return dateStr;
+        }
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${yyyy}.${mm}.${dd}`;
+      }
+
+      // 구글 로그인 콜백 함수
+      function onGoogleSignIn(response) {
+        // response.credential에 JWT가 담겨있음
+        const jwt = response.credential;
+        // JWT를 디코드하거나, 서버로 전달하여 사용자 인증 처리
+        // 예시: 사용자 이름 추출
+        const payload = JSON.parse(atob(jwt.split('.')[1]));
+        alert('환영합니다, ' + payload.name + '님!');
+      }
+
+      // 첫 번째(전체) 피드 기본 표시
+      selectFeed('all');
+    </script>
+  </body>
+</html>
