@@ -2,44 +2,70 @@
 <html>
   <head>
     <meta charset="utf-8">
-    <style>
-      body { font-family: sans-serif; margin: 0; padding: 0; }
-      .navbar {
-        background: #222; color: #fff; padding: 16px 24px; font-size: 1.3em;
-        font-weight: bold; letter-spacing: 1px;
-      }
-      .rss-buttons {
-        display: flex; gap: 12px; padding: 16px 24px; background: #f5f5f5;
-        border-bottom: 1px solid #eee;
-      }
-      .rss-buttons button {
-        padding: 8px 18px; border: none; border-radius: 6px; background: #eee;
-        cursor: pointer; font-size: 1em; transition: background 0.2s;
-      }
-      .rss-buttons button.active {
-        background: #0070f3; color: #fff;
-      }
-      #rss { padding: 24px; }
-    </style>
+    <link rel="stylesheet" href="index.css">
+    <!-- Google Identity Services 라이브러리 추가 -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
   </head>
   <body>
-    <div class="navbar">아티커 - 아티클 모아보기</div>
-    <div class="rss-buttons" id="rss-buttons"></div>
-    <div id="rss"></div>
+    <div class="navbar">
+      <span class="nav-title">티클모아 - 아티클 모아보기</span>
+      <span class="nav-login">
+        <div id="g_id_onload"
+          data-client_id="659949826583-0f71n7kr44grvqrc77qv5iqqmndhl0p0.apps.googleusercontent.com"
+          data-context="signin"
+          data-ux_mode="popup"
+          data-callback="onGoogleSignIn"
+          data-auto_prompt="false">
+        </div>
+        <div class="g_id_signin"
+          data-type="standard"
+          data-shape="rectangular"
+          data-theme="outline"
+          data-text="signin_with"
+          data-size="medium"
+          data-logo_alignment="left">
+        </div>
+      </span>
+    </div>
+    <div class="content-container">
+      <div class="rss-buttons" id="rss-buttons"></div>
+      <div id="rss"></div>
+    </div>
     <script>
       // 여러 RSS 피드 URL을 배열로 관리
       const feeds = [
         {
           name: '토스테크',
-          url: 'https://api.rss2json.com/v1/api.json?rss_url=https://toss.tech/rss.xml',
+          url: 'http://localhost:8000/?url=' + encodeURIComponent('https://toss.tech/rss.xml'),
           icon: 'resources/tosstech.png'
         },
         {
           name: '우아한테크블로그',
-          url: 'https://api.rss2json.com/v1/api.json?rss_url=https://techblog.woowahan.com/feed/',
-          icon: 'resources/woowahan.ico'
+          url: 'http://localhost:8000/?url=' + encodeURIComponent('https://techblog.woowahan.com/feed/'),
+          icon: 'resources/woowahan.png'
         }
       ];
+
+      // 캐시 관리를 위한 객체
+      const feedCache = {
+        data: {},
+        timestamp: {},
+        CACHE_DURATION: 5 * 60 * 1000, // 5분
+
+        async get(key) {
+          const now = Date.now();
+          if (this.data[key] && this.timestamp[key] && 
+              (now - this.timestamp[key] < this.CACHE_DURATION)) {
+            return this.data[key];
+          }
+          return null;
+        },
+
+        set(key, data) {
+          this.data[key] = data;
+          this.timestamp[key] = Date.now();
+        }
+      };
 
       // 버튼 생성
       const btnContainer = document.getElementById('rss-buttons');
@@ -55,9 +81,116 @@
         btn.onclick = () => selectFeed(idx);
         btnContainer.appendChild(btn);
       });
+      // + 버튼 추가 (맨 우측)
+      const plusBtn = document.createElement('button');
+      plusBtn.textContent = '+';
+      plusBtn.style.fontWeight = 'bold';
+      plusBtn.style.fontSize = '1.2em';
+      plusBtn.onclick = () => { window.location.href = 'edit.html'; };
+      btnContainer.appendChild(plusBtn);
+
+      // RSS 피드를 파싱하는 함수
+      async function parseFeed(feed) {
+        try {
+          // 캐시 확인
+          const cachedData = await feedCache.get(feed.url);
+          if (cachedData) {
+            console.log(`Using cached data for ${feed.name}`);
+            return cachedData;
+          }
+
+          console.log(`Fetching feed for ${feed.name}...`);
+          const response = await fetch(feed.url);
+          
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          
+          const text = await response.text();
+          if (!text || text.trim().length === 0) {
+            throw new Error('Empty response received');
+          }
+
+          console.log(`Received data for ${feed.name}, length: ${text.length}`);
+          
+          const parser = new DOMParser();
+          const xml = parser.parseFromString(text, 'text/xml');
+          
+          // Check for parsing errors
+          const parserError = xml.querySelector('parsererror');
+          if (parserError) {
+            throw new Error(`XML parsing error: ${parserError.textContent}`);
+          }
+
+          // RSS 2.0과 Atom 형식 모두 지원
+          const items = Array.from(xml.querySelectorAll('item, entry')).map(item => {
+            try {
+              // title 처리
+              const title = item.querySelector('title')?.textContent || '';
+              
+              // link 처리
+              let link = item.querySelector('link')?.textContent || '';
+              if (!link) {
+                const linkElement = item.querySelector('link');
+                link = linkElement?.getAttribute('href') || '';
+              }
+              
+              // description 처리
+              let description = '';
+              const descElement = item.querySelector('description, content\\:encoded, content');
+              if (descElement) {
+                description = descElement.textContent || '';
+              }
+              
+              // pubDate 처리
+              let pubDate = '';
+              const dateElement = item.querySelector('pubDate, published, dc\\:date');
+              if (dateElement) {
+                pubDate = dateElement.textContent || '';
+              }
+              
+              return {
+                title: title.trim(),
+                link: link.trim(),
+                description: description.trim(),
+                pubDate: pubDate.trim(),
+                feedName: feed.name,
+                feedIcon: feed.icon
+              };
+            } catch (itemError) {
+              console.error(`Error parsing item in ${feed.name}:`, itemError);
+              return null;
+            }
+          }).filter(item => item !== null && item.title && item.link); // 유효한 항목만 필터링
+
+          console.log(`Successfully parsed ${items.length} items from ${feed.name}`);
+          
+          if (items.length === 0) {
+            throw new Error('No valid items found in feed');
+          }
+
+          const result = { name: feed.name, icon: feed.icon, items };
+          // 결과 캐싱
+          feedCache.set(feed.url, result);
+          return result;
+        } catch (error) {
+          console.error(`Error fetching ${feed.name}:`, error);
+          // 캐시된 데이터가 있다면 에러 시 캐시된 데이터 반환
+          const cachedData = await feedCache.get(feed.url);
+          if (cachedData) {
+            console.log(`Returning cached data for ${feed.name}`);
+            return cachedData;
+          }
+          return {
+            name: feed.name,
+            icon: feed.icon,
+            items: []
+          };
+        }
+      }
 
       // 피드 선택 및 표시
-      function selectFeed(idx) {
+      async function selectFeed(idx) {
         // 버튼 active 처리
         Array.from(btnContainer.children).forEach((btn, i) => {
           if(idx === 'all') {
@@ -66,61 +199,58 @@
             btn.classList.toggle('active', i === idx + 1);
           }
         });
-        document.getElementById('rss').innerText = '불러오는 중...';
-        if(idx === 'all') {
-          // 모든 피드 fetch
-          Promise.all(feeds.map(feed =>
-            fetch(feed.url)
-              .then(response => response.json())
-              .then(data => ({ name: feed.name, icon: feed.icon, items: (data.items || []).map(item => ({...item, feedName: feed.name, feedIcon: feed.icon})) }))
-          )).then(results => {
-            // 모든 글을 하나의 배열로 합치고, pubDate 기준 최신순 정렬
+
+        const rssContainer = document.getElementById('rss');
+        rssContainer.innerHTML = '<div class="loading">불러오는 중...<div class="spinner"></div></div>';
+
+        try {
+          if(idx === 'all') {
+            console.log('Fetching all feeds...');
+            // 모든 피드를 병렬로 fetch
+            const results = await Promise.all(feeds.map(feed => parseFeed(feed)));
+            console.log('All feeds results:', results);
+            
             const allItems = results.flatMap(feed => feed.items)
-              .filter(item => item.pubDate)
+              .filter(item => item.pubDate && item.title) // 유효한 항목만 필터링
               .sort((a, b) => new Date(b.pubDate) - new Date(a.pubDate));
+
             if (allItems.length > 0) {
-              const html = allItems.map(item => `
-                <div style=\"margin-bottom:20px;\">
-                  <a href=\"${item.link}\" target=\"_blank\" style=\"font-size:1.2em; font-weight:bold;\">${item.title}</a>
-                  <span style=\"font-size:0.9em; color:#888; margin-left:8px; vertical-align:middle;\">
-                    <img src=\"${item.feedIcon}\" alt=\"icon\" style=\"width:16px; height:16px; vertical-align:middle; margin-right:2px;\">[${item.feedName}]
-                  </span>
-                  <div style=\"font-size:0.9em; color:#888;\">${item.pubDate ? formatDate(item.pubDate) : ''}</div>
-                  ${cleanDescription(item, 'all') ? `<p>${cleanDescription(item, 'all')}</p>` : ''}
+              rssContainer.innerHTML = allItems.map(item => `
+                <div class="article-item">
+                  <img src="${item.feedIcon}" alt="icon" class="article-icon" onerror="this.src='resources/default-icon.png'">
+                  <div class="article-content">
+                    <a href="${item.link}" target="_blank" class="article-title">${item.title}</a>
+                    <div class="article-date">${item.pubDate ? formatDate(item.pubDate) : ''}</div>
+                    ${cleanDescription(item, 'all') ? `<p class='article-desc'>${cleanDescription(item, 'all')}</p>` : ''}
+                  </div>
                 </div>
               `).join('');
-              document.getElementById('rss').innerHTML = html;
             } else {
-              document.getElementById('rss').innerText = 'RSS 항목이 없습니다.';
+              rssContainer.innerHTML = '<div class="error-message">RSS 피드를 불러오는데 실패했습니다. 잠시 후 다시 시도해주세요.</div>';
             }
-          }).catch(err => {
-            document.getElementById('rss').innerText = 'RSS를 불러오지 못했습니다.';
-            console.error(err);
-          });
-        } else {
-          fetch(feeds[idx].url)
-            .then(response => response.json())
-            .then(data => {
-              if (data.items && data.items.length > 0) {
-                const html = data.items.map(item => `
-                  <div style=\"margin-bottom:20px;\">
-                    <a href=\"${item.link}\" target=\"_blank\" style=\"font-size:1.2em; font-weight:bold;\">${item.title}</a>
-                    <span style=\"font-size:0.9em; color:#888; margin-left:8px; vertical-align:middle;\">
-                      <img src=\"${feeds[idx].icon}\" alt=\"icon\" style=\"width:16px; height:16px; vertical-align:middle; margin-right:2px;\">[${feeds[idx].name}]
-                    </span>
-                    <div style=\"font-size:0.9em; color:#888;\">${item.pubDate ? formatDate(item.pubDate) : ''}</div>
-                    ${cleanDescription(item, idx) ? `<p>${cleanDescription(item, idx)}</p>` : ''}
+          } else {
+            console.log(`Fetching feed for ${feeds[idx].name}...`);
+            const data = await parseFeed(feeds[idx]);
+            console.log(`Feed data:`, data);
+            
+            if (data.items && data.items.length > 0) {
+              rssContainer.innerHTML = data.items.map(item => `
+                <div class="article-item">
+                  <img src="${feeds[idx].icon}" alt="icon" class="article-icon" onerror="this.src='resources/default-icon.png'">
+                  <div class="article-content">
+                    <a href="${item.link}" target="_blank" class="article-title">${item.title}</a>
+                    <div class="article-date">${item.pubDate ? formatDate(item.pubDate) : ''}</div>
+                    ${cleanDescription(item, idx) ? `<p class='article-desc'>${cleanDescription(item, idx)}</p>` : ''}
                   </div>
-                `).join('');
-                document.getElementById('rss').innerHTML = html;
-              } else {
-                document.getElementById('rss').innerText = 'RSS 항목이 없습니다.';
-              }
-            })
-            .catch(err => {
-              document.getElementById('rss').innerText = 'RSS를 불러오지 못했습니다.';
-              console.error(err);
-            });
+                </div>
+              `).join('');
+            } else {
+              rssContainer.innerHTML = '<div class="error-message">RSS 피드를 불러오는데 실패했습니다. 잠시 후 다시 시도해주세요.</div>';
+            }
+          }
+        } catch (error) {
+          console.error('Error:', error);
+          rssContainer.innerHTML = '<div class="error-message">RSS 피드를 불러오는데 실패했습니다. 잠시 후 다시 시도해주세요.</div>';
         }
       }
 
@@ -155,6 +285,17 @@
         const mm = String(d.getMonth() + 1).padStart(2, '0');
         const dd = String(d.getDate()).padStart(2, '0');
         return `${yyyy}.${mm}.${dd}`;
+      }
+
+      // 구글 로그인 콜백 함수
+      function onGoogleSignIn(response) {
+        // response.credential에 JWT가 담겨있음
+        const jwt = response.credential;
+        // JWT를 디코드하거나, 서버로 전달하여 사용자 인증 처리
+        // 예시: 사용자 이름 추출
+        const payload = JSON.parse(atob(jwt.split('.')[1]));
+        alert('환영합니다, ' + payload.name + '님!');
+        // 이후 사용자 정보 표시, 로그아웃 등 구현 가능
       }
 
       // 첫 번째(전체) 피드 기본 표시
