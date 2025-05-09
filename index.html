@@ -11,6 +11,8 @@
     <link rel="icon" href="./favicon.ico" type="image/x-icon">
     <!-- Google Identity Services 라이브러리 추가 -->
     <script src="https://accounts.google.com/gsi/client" async></script>
+    <!-- Sortable.js 라이브러리 추가 -->
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
   </head>
   <body>
     <header class="navbar">
@@ -37,6 +39,16 @@
           icon: 'resources/woowahan.png'
         },
         {
+          name: '채널톡 블로그',
+          url: 'https://yohanux.github.io/rss-to-json-feed/channeltalk.json',
+          icon: 'resources/channeltalk.png'
+        },
+        {
+          name: '무신사',
+          url: 'https://yohanux.github.io/rss-to-json-feed/musinsa.json',
+          icon: 'resources/musinsa.png'
+        },
+        {
           name: '당근',
           url: 'https://yohanux.github.io/rss-to-json-feed/daangn.json',
           icon: 'resources/daangn.png'
@@ -46,8 +58,17 @@
       // 활성화된 피드 (초기에는 토스만)
       let activeFeeds = [availableFeeds[0]];
 
-      // 피드 추가 모달 생성
+      // 선택한 피드를 임시 저장할 배열
+      let tempActiveFeeds = [];
+
+      // 현재 선택된 피드의 이름을 저장할 변수로 변경
+      let currentSelectedFeedName = null;
+
+      // 모달 생성 함수 수정
       function createAddFeedModal() {
+        // 임시 피드 배열 초기화
+        tempActiveFeeds = [...activeFeeds];
+        
         const modal = document.createElement('div');
         modal.className = 'modal';
         modal.innerHTML = `
@@ -55,8 +76,9 @@
             <h2>피드 추가/제거</h2>
             <div class="feed-list">
               ${availableFeeds.slice(1).map(feed => `
-                <div class="feed-item ${activeFeeds.some(af => af.name === feed.name) ? 'active' : ''}"
+                <div class="feed-item ${tempActiveFeeds.some(af => af.name === feed.name) ? 'active' : ''}"
                      onclick="toggleFeed('${feed.name}', this)">
+                  <div class="feed-checkbox"></div>
                   <img src="${feed.icon}" alt="${feed.name}" class="feed-icon">
                   <span>${feed.name}</span>
                 </div>
@@ -69,40 +91,22 @@
           </div>
         `;
         document.body.appendChild(modal);
-
-        // 모달 닫기 버튼 스타일 추가
-        const style = document.createElement('style');
-        style.textContent = `
-          .modal-buttons {
-            display: flex;
-            gap: 12px;
-          }
-          .modal-buttons button {
-            flex: 1;
-          }
-          .cancel-button {
-            background-color: #666 !important;
-          }
-          .cancel-button:hover {
-            background-color: #555 !important;
-          }
-        `;
-        document.head.appendChild(style);
       }
-
-      // 선택한 피드를 임시 저장할 배열
-      let tempActiveFeeds = [];
 
       // 피드 토글 함수 수정
       function toggleFeed(feedName, element) {
         const feed = availableFeeds.find(f => f.name === feedName);
+        if (!feed) return;
         
-        if (element.classList.contains('active')) {
+        const isActive = element.classList.contains('active');
+        if (isActive) {
+          // 피드 제거
           element.classList.remove('active');
-          tempActiveFeeds = tempActiveFeeds.filter(af => af.name !== feedName);
+          tempActiveFeeds = tempActiveFeeds.filter(f => f.name !== feedName);
         } else {
+          // 피드 추가
           element.classList.add('active');
-          if (!tempActiveFeeds.some(af => af.name === feedName)) {
+          if (!tempActiveFeeds.some(f => f.name === feedName)) {
             tempActiveFeeds.push(feed);
           }
         }
@@ -289,7 +293,7 @@
       // 피드 변경사항 적용 함수 수정
       function applyFeedChanges() {
         // 토스 피드는 항상 포함
-        activeFeeds = [availableFeeds[0], ...tempActiveFeeds];
+        activeFeeds = [availableFeeds[0], ...tempActiveFeeds.filter(f => f.name !== availableFeeds[0].name)];
         updateButtons();
         selectFeed('all');
         closeModal();
@@ -300,15 +304,17 @@
         }
       }
 
-      // 모달 닫기
+      // 모달 닫기 함수 수정
       function closeModal() {
         const modal = document.querySelector('.modal');
         if (modal) {
           modal.remove();
+          // 임시 피드 배열 초기화
+          tempActiveFeeds = [];
         }
       }
 
-      // 버튼 업데이트
+      // 버튼 업데이트 함수 수정
       function updateButtons() {
         const btnContainer = document.getElementById('rss-buttons');
         btnContainer.innerHTML = '';
@@ -317,15 +323,20 @@
         const allBtn = document.createElement('button');
         allBtn.textContent = '전체';
         allBtn.onclick = () => selectFeed('all');
-        allBtn.classList.add('active');
+        allBtn.setAttribute('data-fixed', 'true');
         btnContainer.appendChild(allBtn);
 
         // 활성화된 피드 버튼 추가
-        activeFeeds.forEach((feed, idx) => {
+        const buttonContainer = document.createElement('div');
+        buttonContainer.className = 'sortable-buttons';
+        btnContainer.appendChild(buttonContainer);
+
+        activeFeeds.forEach((feed) => {
           const btn = document.createElement('button');
           btn.textContent = feed.name;
-          btn.onclick = () => selectFeed(idx);
-          btnContainer.appendChild(btn);
+          btn.onclick = () => selectFeed(feed.name); // 인덱스 대신 피드 이름으로 선택
+          btn.setAttribute('data-feed-name', feed.name);
+          buttonContainer.appendChild(btn);
         });
 
         // + 버튼 추가
@@ -334,7 +345,60 @@
         plusBtn.style.fontWeight = 'bold';
         plusBtn.style.fontSize = '1.2em';
         plusBtn.onclick = createAddFeedModal;
+        plusBtn.setAttribute('data-fixed', 'true');
         btnContainer.appendChild(plusBtn);
+
+        // Sortable 초기화
+        if (window.sortableInstance) {
+          window.sortableInstance.destroy();
+        }
+        
+        window.sortableInstance = new Sortable(buttonContainer, {
+          animation: 150,
+          ghostClass: 'sortable-ghost',
+          onEnd: function(evt) {
+            const buttons = Array.from(buttonContainer.children);
+            const newOrder = buttons.map(btn => btn.getAttribute('data-feed-name'));
+            
+            // 새로운 순서로 activeFeeds 업데이트
+            const newActiveFeeds = [];
+            newOrder.forEach(name => {
+              const feed = activeFeeds.find(f => f.name === name);
+              if (feed) newActiveFeeds.push(feed);
+            });
+            
+            activeFeeds = newActiveFeeds;
+            
+            // 버튼 활성화 상태 업데이트
+            updateButtonActiveStates();
+            
+            if (currentUser) {
+              saveUserFeedSettings();
+            }
+          }
+        });
+
+        // 초기 버튼 활성화 상태 설정
+        updateButtonActiveStates();
+      }
+
+      // 버튼 활성화 상태 업데이트 함수 수정
+      function updateButtonActiveStates() {
+        const btnContainer = document.getElementById('rss-buttons');
+        const allButtons = btnContainer.querySelectorAll('button');
+        
+        allButtons.forEach((btn) => {
+          if (btn.hasAttribute('data-fixed')) {
+            // 전체 버튼 처리
+            if (btn.textContent === '전체') {
+              btn.classList.toggle('active', currentSelectedFeedName === null);
+            }
+          } else {
+            // 피드 버튼 처리
+            const feedName = btn.getAttribute('data-feed-name');
+            btn.classList.toggle('active', feedName === currentSelectedFeedName);
+          }
+        });
       }
 
       // 캐시 관리를 위한 객체
@@ -437,24 +501,25 @@
         }
       }
 
-      // 피드 선택 및 표시
+      // 피드 선택 및 표시 함수 수정
       async function selectFeed(idx) {
-        // 버튼 active 처리
-        Array.from(document.getElementById('rss-buttons').children).forEach((btn, i) => {
-          if(idx === 'all') {
-            btn.classList.toggle('active', i === 0);
-          } else {
-            btn.classList.toggle('active', i === idx + 1);
-          }
-        });
+        if (idx === 'all') {
+          currentSelectedFeedName = null;
+        } else if (typeof idx === 'number' && idx >= 0 && idx < activeFeeds.length) {
+          currentSelectedFeedName = activeFeeds[idx].name;
+        } else if (typeof idx === 'string') {
+          // 피드 이름으로 직접 선택할 경우
+          currentSelectedFeedName = idx;
+        }
+        
+        updateButtonActiveStates();
 
         const rssContainer = document.getElementById('rss');
         rssContainer.innerHTML = '<div class="loading">불러오는 중...<div class="spinner"></div></div>';
 
         try {
-          if(idx === 'all') {
-            debugLog('Fetching all feeds...');
-            // 활성화된 피드만 fetch
+          if(currentSelectedFeedName === null) {
+            // 전체 피드 표시
             const results = await Promise.all(activeFeeds.map(feed => fetchFeed(feed)));
             debugLog('All feeds results:', results);
             
@@ -477,23 +542,26 @@
               rssContainer.innerHTML = '<div class="error-message">피드를 불러오는데 실패했습니다. 잠시 후 다시 시도해주세요.</div>';
             }
           } else {
-            debugLog(`Fetching feed for ${activeFeeds[idx].name}...`);
-            const data = await fetchFeed(activeFeeds[idx]);
-            debugLog(`Feed data:`, data);
-            
-            if (data.items && data.items.length > 0) {
-              rssContainer.innerHTML = data.items.map(item => `
-                <div class="article-item">
-                  <img src="${activeFeeds[idx].icon}" alt="icon" class="article-icon" onerror="this.src='resources/default-icon.png'">
-                  <div class="article-content">
-                    <a href="${item.link}" target="_blank" class="article-title">${item.title}</a>
-                    <div class="article-date">${item.pubDate ? formatDate(item.pubDate) : ''}</div>
-                    ${cleanDescription(item) ? `<p class='article-desc'>${cleanDescription(item)}</p>` : ''}
+            // 특정 피드 표시
+            const selectedFeed = activeFeeds.find(feed => feed.name === currentSelectedFeedName);
+            if (selectedFeed) {
+              const data = await fetchFeed(selectedFeed);
+              debugLog(`Feed data:`, data);
+              
+              if (data.items && data.items.length > 0) {
+                rssContainer.innerHTML = data.items.map(item => `
+                  <div class="article-item">
+                    <img src="${selectedFeed.icon}" alt="icon" class="article-icon" onerror="this.src='resources/default-icon.png'">
+                    <div class="article-content">
+                      <a href="${item.link}" target="_blank" class="article-title">${item.title}</a>
+                      <div class="article-date">${item.pubDate ? formatDate(item.pubDate) : ''}</div>
+                      ${cleanDescription(item) ? `<p class='article-desc'>${cleanDescription(item)}</p>` : ''}
+                    </div>
                   </div>
-                </div>
-              `).join('');
-            } else {
-              rssContainer.innerHTML = '<div class="error-message">피드를 불러오는데 실패했습니다. 잠시 후 다시 시도해주세요.</div>';
+                `).join('');
+              } else {
+                rssContainer.innerHTML = '<div class="error-message">피드를 불러오는데 실패했습니다. 잠시 후 다시 시도해주세요.</div>';
+              }
             }
           }
         } catch (error) {
