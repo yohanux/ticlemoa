@@ -10,27 +10,13 @@
     <link rel="stylesheet" href="./index.css" type="text/css">
     <link rel="icon" href="./favicon.ico" type="image/x-icon">
     <!-- Google Identity Services 라이브러리 추가 -->
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="https://accounts.google.com/gsi/client" async></script>
   </head>
   <body>
     <header class="navbar">
       <h1 class="nav-title">티클모아 - 아티클 모아보기</h1>
-      <div class="nav-login">
-        <div id="g_id_onload"
-          data-client_id="659949826583-0f71n7kr44grvqrc77qv5iqqmndhl0p0.apps.googleusercontent.com"
-          data-context="signin"
-          data-ux_mode="popup"
-          data-callback="onGoogleSignIn"
-          data-auto_prompt="false">
-        </div>
-        <div class="g_id_signin"
-          data-type="standard"
-          data-shape="rectangular"
-          data-theme="outline"
-          data-text="signin_with"
-          data-size="medium"
-          data-logo_alignment="left">
-        </div>
+      <div class="nav-login" id="nav-login">
+        <!-- Google Sign-In button will be rendered here -->
       </div>
     </header>
     <main class="content-container">
@@ -125,28 +111,74 @@
       // 사용자 상태 관리
       let currentUser = null;
 
-      // 구글 로그인 콜백 함수 수정
-      async function onGoogleSignIn(response) {
-        const jwt = response.credential;
-        const payload = JSON.parse(atob(jwt.split('.')[1]));
-        
-        currentUser = {
-          id: payload.sub,
-          name: payload.name,
-          email: payload.email,
-          token: jwt
-        };
+      // Google OAuth 클라이언트 ID
+      const GOOGLE_CLIENT_ID = '659949826583-0f71n7kr44grvqrc77qv5iqqmndhl0p0.apps.googleusercontent.com';
 
-        // 로그인 상태 표시
-        updateLoginStatus();
-        
-        // 사용자의 피드 설정 불러오기
-        await loadUserFeedSettings();
+      // Google Sign-In 초기화
+      function initializeGoogleSignIn() {
+        if (!window.google || !window.google.accounts) {
+          console.error('Google Identity Services not loaded yet');
+          setTimeout(initializeGoogleSignIn, 100);
+          return;
+        }
+
+        try {
+          google.accounts.id.initialize({
+            client_id: GOOGLE_CLIENT_ID,
+            callback: handleGoogleSignIn,
+            auto_select: false,
+            cancel_on_tap_outside: true
+          });
+
+          google.accounts.id.renderButton(
+            document.getElementById('nav-login'),
+            { 
+              type: 'standard',
+              theme: 'outline',
+              size: 'medium',
+              text: 'signin_with',
+              shape: 'rectangular',
+              logo_alignment: 'left'
+            }
+          );
+        } catch (error) {
+          console.error('Failed to initialize Google Sign-In:', error);
+        }
+      }
+
+      // 구글 로그인 콜백 함수
+      async function handleGoogleSignIn(response) {
+        try {
+          if (!response.credential) {
+            throw new Error('No credential received');
+          }
+
+          const jwt = response.credential;
+          const payload = JSON.parse(atob(jwt.split('.')[1]));
+          
+          currentUser = {
+            id: payload.sub,
+            name: payload.name,
+            email: payload.email,
+            token: jwt
+          };
+
+          // 로그인 상태 표시
+          updateLoginStatus();
+          
+          // 사용자의 피드 설정 불러오기
+          await loadUserFeedSettings();
+        } catch (error) {
+          console.error('Google Sign-In error:', error);
+          alert('로그인 중 오류가 발생했습니다. 다시 시도해주세요.');
+        }
       }
 
       // 로그인 상태 UI 업데이트
       function updateLoginStatus() {
-        const loginContainer = document.querySelector('.nav-login');
+        const loginContainer = document.getElementById('nav-login');
+        if (!loginContainer) return;
+
         if (currentUser) {
           loginContainer.innerHTML = `
             <div class="user-info">
@@ -155,30 +187,20 @@
             </div>
           `;
         } else {
-          loginContainer.innerHTML = `
-            <div id="g_id_onload"
-              data-client_id="659949826583-0f71n7kr44grvqrc77qv5iqqmndhl0p0.apps.googleusercontent.com"
-              data-context="signin"
-              data-ux_mode="popup"
-              data-callback="onGoogleSignIn"
-              data-auto_prompt="false">
-            </div>
-            <div class="g_id_signin"
-              data-type="standard"
-              data-shape="rectangular"
-              data-theme="outline"
-              data-text="signin_with"
-              data-size="medium"
-              data-logo_alignment="left">
-            </div>
-          `;
-          
-          // Google Identity Services 재초기화
+          loginContainer.innerHTML = '';
+          // Google Sign-In 버튼 다시 렌더링
           if (window.google && window.google.accounts) {
-            google.accounts.id.initialize({
-              client_id: "659949826583-0f71n7kr44grvqrc77qv5iqqmndhl0p0.apps.googleusercontent.com",
-              callback: onGoogleSignIn
-            });
+            google.accounts.id.renderButton(
+              loginContainer,
+              { 
+                type: 'standard',
+                theme: 'outline',
+                size: 'medium',
+                text: 'signin_with',
+                shape: 'rectangular',
+                logo_alignment: 'left'
+              }
+            );
           }
         }
       }
@@ -187,14 +209,21 @@
       function handleSignOut() {
         if (window.google && window.google.accounts) {
           google.accounts.id.disableAutoSelect();
+          google.accounts.id.revoke(currentUser.id, () => {
+            currentUser = null;
+            // 기본 피드 설정으로 복원
+            activeFeeds = [availableFeeds[0]];
+            updateLoginStatus();
+            updateButtons();
+            selectFeed('all');
+          });
         }
-        currentUser = null;
-        // 기본 피드 설정으로 복원
-        activeFeeds = [availableFeeds[0]];
-        updateLoginStatus();
-        updateButtons();
-        selectFeed('all');
       }
+
+      // 페이지 로드 시 Google Sign-In 초기화
+      document.addEventListener('DOMContentLoaded', () => {
+        initializeGoogleSignIn();
+      });
 
       // 사용자 피드 설정 저장
       async function saveUserFeedSettings() {
